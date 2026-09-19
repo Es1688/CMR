@@ -17,6 +17,15 @@
     });
   }
 
+  /**
+   * Оставляет только https-ссылки — доп. защита href/src от
+   * javascript:, data: и прочих опасных схем (esc() при этом сохраняется).
+   */
+  function safeUrl(value) {
+    var v = String(value == null ? '' : value).trim();
+    return /^https:\/\//i.test(v) ? v : '';
+  }
+
   /** Вызов серверной функции Apps Script, возвращающий Promise. */
   function callServer(fn) {
     var args = Array.prototype.slice.call(arguments, 1);
@@ -111,7 +120,7 @@
 
     var nick = '';
     if (c.igUsername) {
-      var href = c.igLink || ('https://www.instagram.com/' + c.igUsername + '/');
+      var href = safeUrl(c.igLink) || ('https://www.instagram.com/' + c.igUsername + '/');
       nick = '<a class="card-nick" href="' + esc(href) + '" target="_blank" rel="noopener">@' + esc(c.igUsername) + '</a>';
     }
 
@@ -160,7 +169,8 @@
 
   function avatarHtml(letterSource, url) {
     var letter = (letterSource || '?').charAt(0).toUpperCase();
-    var img = url ? '<img src="' + esc(url) + '" alt="" loading="lazy" onerror="this.remove()">' : '';
+    var src = safeUrl(url);
+    var img = src ? '<img src="' + esc(src) + '" alt="" loading="lazy" onerror="this.remove()">' : '';
     return '<div class="avatar" data-letter="' + esc(letter) + '">' + img + '</div>';
   }
 
@@ -294,7 +304,7 @@
   function updateAvatarPreview() {
     var wrap = $('f-avatar-wrap');
     var img = wrap.querySelector('img');
-    var src = $('f-avatar').value.trim();
+    var src = safeUrl($('f-avatar').value);
 
     if (src) {
       if (!img) {
@@ -420,7 +430,12 @@
   /* ---------- Комментарии ---------- */
 
   function loadComments(id) {
-    callServer('getComments', id).then(renderComments).catch(function () {
+    callServer('getComments', id).then(function (list) {
+      // пока запрос шёл, могли открыть другого клиента —
+      // чужие комментарии в карточку не отрисовываем
+      if (commentsClientId !== id) return;
+      renderComments(list);
+    }).catch(function () {
       // список комментариев не критичен — молча оставляем пустым
     });
   }
@@ -447,9 +462,11 @@
   function submitComment() {
     var text = $('f-comment').value.trim();
     if (!text || !commentsClientId) return;
+    var clientId = commentsClientId;
     var btn = $('btn-add-comment');
     btn.disabled = true;
-    callServer('addComment', commentsClientId, text).then(function (list) {
+    callServer('addComment', clientId, text).then(function (list) {
+      if (commentsClientId !== clientId) return; // открыт другой клиент
       $('f-comment').value = '';
       renderComments(list);
     }).catch(function (err) {

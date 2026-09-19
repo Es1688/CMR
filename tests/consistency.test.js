@@ -52,4 +52,20 @@ assert.ok(index.includes("include('JavaScript')"), 'Index.html должен по
 assert.ok(gs.includes("createTemplateFromFile('Index')"), 'doGet должен открывать шаблон Index');
 console.log('  ok  Index подключает Styles и JavaScript, doGet отдаёт Index');
 
+// 5. Серверная авторизация: критичные функции вызывают assertAuthorized_()
+const protectedFns = ['getClients', 'getSettings', 'saveClient', 'deleteClient',
+  'getComments', 'addComment', 'exportXlsx', 'fetchInstagramData'];
+const decls = [];
+for (const m of gs.matchAll(/^function\s+(\w+)/gm)) decls.push({ name: m[1], start: m.index });
+for (const fn of protectedFns) {
+  const i = decls.findIndex(function (d) { return d.name === fn; });
+  assert.ok(i !== -1, 'Code.gs не содержит функцию ' + fn);
+  const end = i + 1 < decls.length ? decls[i + 1].start : gs.length;
+  assert.ok(
+    gs.slice(decls[i].start, end).includes('assertAuthorized_()'),
+    'Функция ' + fn + ' не вызывает assertAuthorized_() — нет серверной авторизации'
+  );
+}
+console.log('  ok  серверная авторизация на месте: ' + protectedFns.join(', '));
+
 console.log('\nВсе проверки консистентности пройдены.');

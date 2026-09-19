@@ -44,11 +44,29 @@ var COMMENT_FIELDS = [
 var DEFAULT_CATEGORIES = ['Блогер', 'Магазин', 'Услуга', 'Другое'];
 var DEFAULT_STATUSES = ['Новый', 'В работе', 'Ожидание', 'Сделка', 'Отказ'];
 
+/**
+ * Список Google-аккаунтов (email), которым разрешена работа с CRM.
+ * Пустой список — доступ только у владельца, под аккаунтом которого
+ * развёрнуто веб-приложение. Регистр букв не важен.
+ * Пример: var ALLOWED_USERS = ['kollega@gmail.com', 'assistant@gmail.com'];
+ */
+var ALLOWED_USERS = [];
+
 /* ------------------------------------------------------------------ */
 /* Веб-приложение                                                     */
 /* ------------------------------------------------------------------ */
 
 function doGet() {
+  try {
+    assertAuthorized_();
+  } catch (e) {
+    // страница не отдаётся тем, кому доступ запрещён; текст ошибки —
+    // общий, без перечисления пользователей
+    return HtmlService.createHtmlOutput(
+      '<p style="font-family:Arial,sans-serif;font-size:16px;padding:24px;">' +
+      'Доступ запрещён. Откройте CRM под Google-аккаунтом, которому разрешён доступ.</p>'
+    ).setTitle('CRM · Клиенты');
+  }
   ensureSetup_();
   return HtmlService.createTemplateFromFile('Index').evaluate()
     .setTitle('CRM · Клиенты')
@@ -59,6 +77,43 @@ function doGet() {
 /** Подключает Styles.html и JavaScript.html внутрь Index.html. */
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+/* ------------------------------------------------------------------ */
+/* Авторизация                                                        */
+/* ------------------------------------------------------------------ */
+
+/** Email текущего пользователя или '', если Google его не сообщает. */
+function currentUserEmail_() {
+  try {
+    return String(Session.getActiveUser().getEmail() || '').trim();
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * Серверная проверка доступа. Вызывается в начале каждой функции,
+ * доступной интерфейсу: frontend не считается механизмом защиты.
+ * Проходят владелец развёртывания и пользователи из ALLOWED_USERS.
+ */
+function assertAuthorized_() {
+  var email = currentUserEmail_();
+  if (!email) {
+    throw new Error('Доступ запрещён: не удалось определить ваш Google-аккаунт. Откройте CRM под своим аккаунтом и повторите.');
+  }
+  var normalized = email.toLowerCase();
+  var owner = '';
+  try {
+    owner = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+  } catch (e) {
+    // владелец недоступен — остаются только ALLOWED_USERS
+  }
+  if (owner && normalized === owner) return; // владелец CRM
+  for (var i = 0; i < ALLOWED_USERS.length; i++) {
+    if (String(ALLOWED_USERS[i] || '').trim().toLowerCase() === normalized) return;
+  }
+  throw new Error('Доступ запрещён: ваш аккаунт не входит в список разрешённых пользователей этой CRM.');
 }
 
 /* ------------------------------------------------------------------ */
@@ -136,6 +191,7 @@ function sheet_(name) {
 /* ------------------------------------------------------------------ */
 
 function getClients() {
+  assertAuthorized_();
   ensureSetup_();
   var sheet = sheet_(SHEET_CLIENTS);
   var lastRow = sheet.getLastRow();
@@ -163,25 +219,34 @@ function saveClient(client) {
   if (!client || typeof client !== 'object') {
     throw new Error('Не переданы данные клиента');
   }
+  assertAuthorized_();
   ensureSetup_();
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
     var sheet = sheet_(SHEET_CLIENTS);
+    var rowNum = 0;
+    var existingRow = null;
+    if (client.id) {
+      rowNum = findClientRow_(sheet, String(client.id));
+      if (!rowNum) {
+        throw new Error('Клиент не найден — возможно, он был удалён. Закройте карточку и обновите список.');
+      }
+      existingRow = sheet.getRange(rowNum, 1, 1, CLIENT_FIELDS.length).getValues()[0];
+    }
+    // проверяем данные до записи; при редактировании разрешаем прежние
+    // категорию/статус, которых уже нет в «Настройках»
+    validateClient_(client, existingRow, readSettingsLists_());
+
     var now = now_();
     var row = CLIENT_FIELDS.map(function (f) { return clean_(client[f.key]); });
     var idIdx = fieldIndex_('id');
     var createdIdx = fieldIndex_('created');
     var updatedIdx = fieldIndex_('updated');
 
-    if (client.id) {
-      var rowNum = findClientRow_(sheet, String(client.id));
-      if (!rowNum) {
-        throw new Error('Клиент не найден — возможно, он был удалён. Закройте карточку и обновите список.');
-      }
-      var existing = sheet.getRange(rowNum, 1, 1, CLIENT_FIELDS.length).getValues()[0];
-      row[idIdx] = existing[idIdx];
-      row[createdIdx] = normalizeCell_(existing[createdIdx]) || now;
+    if (existingRow) {
+      row[idIdx] = existingRow[idIdx];
+      row[createdIdx] = normalizeCell_(existingRow[createdIdx]) || now;
       row[updatedIdx] = now;
       sheet.getRange(rowNum, 1, 1, CLIENT_FIELDS.length).setValues([row]);
       return { id: row[idIdx], created: false };
@@ -198,13 +263,17 @@ function saveClient(client) {
 }
 
 function deleteClient(id) {
+  assertAuthorized_();
   ensureSetup_();
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
     var clientsSheet = sheet_(SHEET_CLIENTS);
     var rowNum = findClientRow_(clientsSheet, String(id));
-    if (rowNum) clientsSheet.deleteRow(rowNum);
+    if (!rowNum) {
+      throw new Error('Клиент не найден или уже удалён');
+    }
+    clientsSheet.deleteRow(rowNum);
 
     // вместе с клиентом удаляем его комментарии
     var commentsSheet = sheet_(SHEET_COMMENTS);
@@ -236,7 +305,11 @@ function findClientRow_(sheet, id) {
 /* ------------------------------------------------------------------ */
 
 function getComments(clientId) {
+  assertAuthorized_();
   ensureSetup_();
+  if (!findClientRow_(sheet_(SHEET_CLIENTS), String(clientId))) {
+    throw new Error('Клиент не найден');
+  }
   var sheet = sheet_(SHEET_COMMENTS);
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
@@ -259,20 +332,21 @@ function getComments(clientId) {
 
 /** Добавляет комментарий и возвращает обновлённый список комментариев клиента. */
 function addComment(clientId, text) {
+  assertAuthorized_();
   text = clean_(text);
   if (!text) throw new Error('Пустой комментарий');
+  if (text.length > 5000) throw new Error('Комментарий слишком длинный: максимум 5000 символов');
   ensureSetup_();
 
-  var author = '';
-  try {
-    author = (Session.getActiveUser().getEmail() || '').trim();
-  } catch (e) {
-    // адрес недоступен — оставляем пустым
-  }
+  var author = currentUserEmail_();
 
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    // не создаём комментарий для несуществующего клиента
+    if (!findClientRow_(sheet_(SHEET_CLIENTS), String(clientId))) {
+      throw new Error('Клиент не найден');
+    }
     var sheet = sheet_(SHEET_COMMENTS);
     sheet.appendRow([
       Utilities.getUuid(),
@@ -292,7 +366,13 @@ function addComment(clientId, text) {
 /* ------------------------------------------------------------------ */
 
 function getSettings() {
+  assertAuthorized_();
   ensureSetup_();
+  return readSettingsLists_();
+}
+
+/** Списки категорий и статусов с листа «Настройки» (без ensureSetup_). */
+function readSettingsLists_() {
   var sheet = sheet_(SHEET_SETTINGS);
   var lastRow = sheet.getLastRow();
   var categories = [];
@@ -308,6 +388,119 @@ function getSettings() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Серверная валидация клиента                                        */
+/*                                                                    */
+/* Выполняется в saveClient до записи в таблицу: интерфейс            */
+/* не считается источником доверия.                                   */
+/* ------------------------------------------------------------------ */
+
+/** Разумные ограничения длины текстовых полей клиента. */
+var CLIENT_FIELD_LIMITS = {
+  name: 200, igUsername: 30, igLink: 500, avatar: 1000, bio: 2000,
+  phone: 50, email: 254, city: 100, notes: 5000,
+  category: 100, status: 100
+};
+
+var CLIENT_FIELD_LABELS = {
+  name: 'Имя', igUsername: 'Instagram-ник', igLink: 'Instagram-ссылка',
+  avatar: 'Аватар', bio: 'Биография', phone: 'Телефон', email: 'Email',
+  city: 'Город', notes: 'Примечания', category: 'Категория', status: 'Статус'
+};
+
+var LIKE_LEVELS = ['1', '2', '3', '4', '5'];
+
+/**
+ * Проверяет данные клиента; при ошибке бросает исключение с понятным
+ * сообщением. existingRow — текущая строка клиента при редактировании
+ * (позволяет сохранить прежние категорию/статус, удалённые из «Настроек»);
+ * settingsLists — заранее прочитанные списки категорий и статусов.
+ */
+function validateClient_(client, existingRow, settingsLists) {
+  var get = function (key) { return clean_(client[key]); };
+
+  if (!get('name') && !get('igUsername')) {
+    throw new Error('Укажите хотя бы имя или Instagram-ник клиента');
+  }
+
+  for (var key in CLIENT_FIELD_LIMITS) {
+    var value = get(key);
+    if (value.length > CLIENT_FIELD_LIMITS[key]) {
+      throw new Error('Поле «' + CLIENT_FIELD_LABELS[key] + '» слишком длинное: максимум ' + CLIENT_FIELD_LIMITS[key] + ' символов');
+    }
+  }
+
+  var igUsername = get('igUsername');
+  if (igUsername && !IG_USERNAME_RE.test(igUsername)) {
+    throw new Error('Instagram-ник может содержать только латинские буквы, цифры, точку и подчёркивание (до 30 символов)');
+  }
+
+  assertHttpsUrl_(get('igLink'), 'Instagram-ссылка');
+  assertHttpsUrl_(get('avatar'), 'Ссылка на аватар');
+
+  var likeLevel = get('likeLevel');
+  if (likeLevel !== '' && LIKE_LEVELS.indexOf(likeLevel) === -1) {
+    throw new Error('Оценка «Нравится» может быть пустой или числом от 1 до 5');
+  }
+
+  var sessionMoney = get('sessionMoney');
+  if (sessionMoney !== '') {
+    var money = parseNumber_(sessionMoney);
+    if (money === null) throw new Error('Поле «Доход за сеанс» должно быть числом');
+    if (money < 0) throw new Error('Поле «Доход за сеанс» не может быть отрицательным');
+  }
+
+  var tattooCount = get('tattooCount');
+  if (tattooCount !== '') {
+    var count = parseNumber_(tattooCount);
+    if (count === null || Math.floor(count) !== count) {
+      throw new Error('Поле «Татуировок сделано» должно быть целым числом');
+    }
+    if (count < 0) throw new Error('Поле «Татуировок сделано» не может быть отрицательным');
+  }
+
+  validateChoice_(get('category'), 'category', existingRow, settingsLists);
+  validateChoice_(get('status'), 'status', existingRow, settingsLists);
+}
+
+/**
+ * Категория/статус должны входить в списки с листа «Настройки»;
+ * при редактировании дополнительно принимается прежнее значение строки,
+ * чтобы клиент с «архаичной» категорией оставался редактируемым.
+ */
+function validateChoice_(value, key, existingRow, settingsLists) {
+  if (!value) return;
+  var lists = settingsLists || readSettingsLists_();
+  var allowed = (key === 'category' ? lists.categories : lists.statuses) || [];
+  if (allowed.indexOf(value) !== -1) return;
+  if (existingRow && normalizeCell_(existingRow[fieldIndex_(key)]) === value) return;
+  throw new Error(CLIENT_FIELD_LABELS[key] + ' «' + value + '» не входит в список на листе «Настройки»');
+}
+
+/**
+ * Допускает только корректные https://-ссылки: javascript:, data:,
+ * vbscript: и прочие схемы отсекаются. Пустое значение допустимо.
+ */
+function assertHttpsUrl_(value, label) {
+  var v = clean_(value);
+  if (!v) return;
+  var isHttps = false;
+  try {
+    isHttps = new URL(v).protocol === 'https:';
+  } catch (e) {
+    isHttps = false;
+  }
+  if (!isHttps) {
+    throw new Error(label + ': допускаются только ссылки вида https://…');
+  }
+}
+
+/** '5 000,50' -> 5000.5; не число -> null. */
+function parseNumber_(value) {
+  var num = Number(String(value).replace(/\s/g, '').replace(',', '.'));
+  return isFinite(num) ? num : null;
+}
+
+/* ------------------------------------------------------------------ */
 /* Instagram: автозаполнение по ссылке                                */
 /*                                                                    */
 /* Бесплатный способ с цепочкой фолбэков:                             */
@@ -320,6 +513,7 @@ var IG_RESERVED_PATHS = ['p', 'reel', 'reels', 'tv', 'stories', 'explore', 'acco
 var IG_USERNAME_RE = /^[A-Za-z0-9._]{1,30}$/;
 
 function fetchInstagramData(input) {
+  assertAuthorized_();
   var username = parseInstagramUsername_(input);
   if (!username) {
     return {
@@ -352,6 +546,9 @@ function fetchInstagramData(input) {
       }
     }
   } catch (e) {
+    // Instagram мог временно заблокировать запрос; причина — в журнал,
+    // пользователю возвращается запасной способ
+    console.error('fetchInstagramData: web_profile_info не ответил: ' + (e && e.message ? e.message : e));
     // переходим к запасному способу
   }
 
@@ -373,6 +570,7 @@ function fetchInstagramData(input) {
       }
     }
   } catch (e) {
+    console.error('fetchInstagramData: страница профиля недоступна: ' + (e && e.message ? e.message : e));
     // данных нет — заполняем что знаем
   }
 
@@ -480,6 +678,7 @@ function decodeHtmlEntities_(s) {
  * и запускает скачивание прямо в браузере (права на Drive не нужны).
  */
 function exportXlsx() {
+  assertAuthorized_();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var url = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?format=xlsx';
   var resp = UrlFetchApp.fetch(url, {
