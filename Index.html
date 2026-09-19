@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <base target="_top">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span>CRM · Клиенты</span>
+        <span id="count-badge" class="count-badge hidden">0</span>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" id="btn-export" class="btn" title="Скачать базу в формате Excel">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          Экспорт
+        </button>
+        <button type="button" id="btn-add" class="btn btn-primary">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Добавить
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="wrap toolbar">
+    <div class="search-wrap">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="search" class="input" type="search" placeholder="Поиск: имя, ник, телефон, email, город, заметка…">
+    </div>
+    <select id="filter-category" class="select" aria-label="Фильтр по категории"></select>
+    <select id="filter-status" class="select" aria-label="Фильтр по статусу"></select>
+  </div>
+
+  <main class="wrap">
+    <div id="cards" class="cards"></div>
+    <div id="empty" class="empty hidden"></div>
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <span>Загрузка базы…</span>
+    </div>
+  </main>
+
+  <!-- Модальное окно: добавление клиента / карточка клиента -->
+  <div id="modal-client" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="modal-title">Новый клиент</h2>
+        <button type="button" class="modal-close" data-close aria-label="Закрыть">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <section class="ig-box">
+          <div class="ig-box-label">Автозаполнение из Instagram</div>
+          <div class="ig-row">
+            <input id="ig-input" class="input" placeholder="Ссылка на профиль или ник, например @maria.flowers">
+            <button type="button" id="btn-ig-fetch" class="btn">Получить данные</button>
+          </div>
+          <div id="ig-status" class="ig-status hidden"></div>
+        </section>
+
+        <div class="avatar-line">
+          <div class="avatar avatar-lg" id="f-avatar-wrap" data-letter="?"></div>
+          <div class="avatar-line-hint">Заполните имя или получите данные из Instagram — здесь появится фото клиента</div>
+        </div>
+
+        <form id="client-form" autocomplete="off" onsubmit="return false;">
+          <input type="hidden" id="f-id">
+          <div class="grid2">
+            <label class="field"><span class="field-label">Имя</span>
+              <input id="f-name" class="input" placeholder="Как обращаться к клиенту">
+            </label>
+            <label class="field"><span class="field-label">Телефон</span>
+              <input id="f-phone" class="input" type="tel" placeholder="+7 ...">
+            </label>
+            <label class="field"><span class="field-label">Instagram-ник</span>
+              <input id="f-ig-username" class="input" placeholder="username">
+            </label>
+            <label class="field"><span class="field-label">Email</span>
+              <input id="f-email" class="input" type="email" placeholder="mail@example.com">
+            </label>
+            <label class="field"><span class="field-label">Instagram-ссылка</span>
+              <input id="f-ig-link" class="input" placeholder="https://www.instagram.com/username/">
+            </label>
+            <label class="field"><span class="field-label">Город</span>
+              <input id="f-city" class="input" placeholder="Город">
+            </label>
+            <label class="field"><span class="field-label">Категория</span>
+              <select id="f-category" class="select"></select>
+            </label>
+            <label class="field"><span class="field-label">Статус</span>
+              <select id="f-status" class="select"></select>
+            </label>
+          </div>
+
+          <section class="assess-box">
+            <div class="assess-box-label">Моя оценка клиента</div>
+            <div class="assess-grid">
+              <div class="field">
+                <span class="field-label">Насколько нравится</span>
+                <div class="star-row" id="like-stars">
+                  <input type="hidden" id="f-like">
+                  <button type="button" class="star-btn" data-value="1" aria-label="Оценка 1">★</button>
+                  <button type="button" class="star-btn" data-value="2" aria-label="Оценка 2">★</button>
+                  <button type="button" class="star-btn" data-value="3" aria-label="Оценка 3">★</button>
+                  <button type="button" class="star-btn" data-value="4" aria-label="Оценка 4">★</button>
+                  <button type="button" class="star-btn" data-value="5" aria-label="Оценка 5">★</button>
+                  <button type="button" id="like-clear" class="star-clear" title="Сбросить оценку" aria-label="Сбросить оценку">&times;</button>
+                </div>
+              </div>
+              <label class="field"><span class="field-label">Доход за сеанс, ₽</span>
+                <input id="f-money" class="input" type="number" min="0" step="any" placeholder="Сколько можно поиметь за сеанс">
+              </label>
+              <label class="field"><span class="field-label">Татуировок сделано</span>
+                <input id="f-tattoos" class="input" type="number" min="0" step="1" placeholder="0">
+              </label>
+            </div>
+          </section>
+
+          <label class="field"><span class="field-label">Биография (из профиля)</span>
+            <textarea id="f-bio" class="input" rows="2" placeholder="Описание профиля Instagram"></textarea>
+          </label>
+          <label class="field"><span class="field-label">Аватар (ссылка на фото)</span>
+            <input id="f-avatar" class="input" placeholder="https://…">
+          </label>
+          <label class="field"><span class="field-label">Примечания</span>
+            <textarea id="f-notes" class="input" rows="3" placeholder="Всё, что важно помнить про клиента"></textarea>
+          </label>
+          <div id="f-dates" class="dates hidden"></div>
+        </form>
+
+        <section id="comments-section" class="comments-section hidden">
+          <div class="comments-head">
+            Комментарии
+            <span id="comments-count" class="comments-count">0</span>
+          </div>
+          <div id="comments-list"></div>
+          <div id="comments-empty" class="comments-empty">Комментариев пока нет.</div>
+          <div class="comment-form">
+            <textarea id="f-comment" class="input" rows="2" placeholder="Новый комментарий…"></textarea>
+            <button type="button" id="btn-add-comment" class="btn">Добавить</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="modal-foot">
+        <button type="button" id="btn-delete" class="btn btn-danger hidden">Удалить</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Отмена</button>
+        <button type="button" id="btn-save" class="btn btn-primary">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>
