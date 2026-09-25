@@ -11,7 +11,7 @@ const path = require('path');
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
 const api = new Function(
-  src + '\nreturn { CLIENT_FIELDS, clean_, fieldIndex_, validateClient_, assertHttpsUrl_ };'
+  src + '\nreturn { CLIENT_FIELDS, clean_, fieldIndex_, validateClient_, assertHttpsUrl_, findDuplicateUsername_ };'
 )();
 
 const LISTS = {
@@ -224,5 +224,44 @@ checkThrows('data: в avatar отклоняется валидатором кл�
   c.avatar = 'data:image/svg+xml,<svg onload="alert(1)">';
   api.validateClient_(c, null, LISTS);
 }, 'Ссылка на аватар');
+
+/* ---------------- дубликат Instagram-ника ---------------- */
+
+console.log('findDuplicateUsername_:');
+const idIdx = api.fieldIndex_('id');
+const unIdx = api.fieldIndex_('igUsername');
+// значения строк листа «Клиенты» без заголовка: строка листа = индекс + 2
+const dupRows = [
+  existingRow({ id: 'uuid-1', igUsername: 'maria.flowers' }),
+  existingRow({ id: 'uuid-2', igUsername: 'other_user' }),
+  existingRow({ id: 'uuid-3', igUsername: '' })
+];
+check('находит дубликат без учёта регистра', () => {
+  assert.strictEqual(
+    api.findDuplicateUsername_(dupRows, idIdx, unIdx, 'MARIA.FLOWERS', ''), 2);
+});
+check('нет дубликата — возвращает 0', () => {
+  assert.strictEqual(
+    api.findDuplicateUsername_(dupRows, idIdx, unIdx, 'free.nick', ''), 0);
+});
+check('пустой искомый ник — возвращает 0', () => {
+  assert.strictEqual(api.findDuplicateUsername_(dupRows, idIdx, unIdx, '   ', ''), 0);
+});
+check('пустые ячейки ника в таблице не дают ложного дубликата', () => {
+  assert.strictEqual(api.findDuplicateUsername_(dupRows, idIdx, unIdx, '', ''), 0);
+});
+check('своя строка при редактировании не считается дубликатом', () => {
+  assert.strictEqual(
+    api.findDuplicateUsername_(dupRows, idIdx, unIdx, 'Maria.Flowers', 'uuid-1'), 0);
+});
+check('чужая строка находится и при редактировании', () => {
+  assert.strictEqual(
+    api.findDuplicateUsername_(dupRows, idIdx, unIdx, 'other_user', 'uuid-1'), 3);
+});
+check('ники сравниваются с обрезкой пробелов', () => {
+  assert.strictEqual(api.findDuplicateUsername_(
+    [existingRow({ id: 'uuid-1', igUsername: '  maria.flowers  ' })],
+    idIdx, unIdx, ' maria.flowers ', ''), 2);
+});
 
 console.log('\nПройдено проверок: ' + passed);

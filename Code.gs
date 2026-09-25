@@ -238,6 +238,22 @@ function saveClient(client) {
     // категорию/статус, которых уже нет в «Настройках»
     validateClient_(client, existingRow, readSettingsLists_());
 
+    // Instagram-ник уникален в базе; при редактировании своя строка — не дубликат
+    var username = clean_(client.igUsername);
+    var lastRow = sheet.getLastRow();
+    if (username && lastRow >= 2) {
+      var width = Math.min(sheet.getLastColumn(), CLIENT_FIELDS.length);
+      var values = sheet.getRange(2, 1, lastRow - 1, width).getValues();
+      var excludeId = existingRow ? normalizeCell_(existingRow[fieldIndex_('id')]) : '';
+      var dupRow = findDuplicateUsername_(values, fieldIndex_('id'),
+        fieldIndex_('igUsername'), username, excludeId);
+      if (dupRow) {
+        var dupName = normalizeCell_(values[dupRow - 2][fieldIndex_('name')]);
+        throw new Error('Клиент с таким Instagram-ником уже добавлен в базу' +
+          (dupName ? ': «' + dupName + '»' : ''));
+      }
+    }
+
     var now = now_();
     var row = CLIENT_FIELDS.map(function (f) { return clean_(client[f.key]); });
     var idIdx = fieldIndex_('id');
@@ -296,6 +312,24 @@ function findClientRow_(sheet, id) {
   var ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
   for (var i = 0; i < ids.length; i++) {
     if (String(ids[i][0]) === String(id)) return i + 2;
+  }
+  return 0;
+}
+
+/**
+ * Ищет в прочитанных строках листа «Клиенты» дубликат Instagram-ника:
+ * сравнение без учёта регистра, у клиента с id = excludeId (редактируемого)
+ * собственный ник дубликатом не считается. Возвращает номер строки листа
+ * или 0, если дубликата нет.
+ */
+function findDuplicateUsername_(values, idIdx, usernameIdx, username, excludeId) {
+  var needle = clean_(username).toLowerCase();
+  if (!needle) return 0;
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    if (clean_(row[usernameIdx]).toLowerCase() !== needle) continue;
+    if (excludeId && String(row[idIdx]) === String(excludeId)) continue;
+    return i + 2;
   }
   return 0;
 }

@@ -273,6 +273,9 @@
     $('comments-section').classList.toggle('hidden', !isEdit);
 
     hideIgStatus();
+    // сбрасывает предупреждение, а при открытии карточки с уже
+    // дублирующим ником — сразу показывает его
+    checkUsernameDuplicate();
     $('ig-input').value = isEdit && client.igUsername ? (client.igLink || client.igUsername) : '';
     updateAvatarPreview();
 
@@ -335,6 +338,39 @@
     el.className = 'ig-status ' + type;
   }
 
+  /* ---------- Предупреждение о дубликате ника ---------- */
+
+  /** Ищет среди загруженных клиентов дубликат ника (без учёта регистра). */
+  function findDuplicateClient(username, excludeId) {
+    var needle = String(username || '').trim().toLowerCase();
+    if (!needle) return null;
+    for (var i = 0; i < state.clients.length; i++) {
+      var c = state.clients[i];
+      if (excludeId && String(c.id) === String(excludeId)) continue;
+      if (String(c.igUsername || '').trim().toLowerCase() === needle) return c;
+    }
+    return null;
+  }
+
+  function hideUsernameStatus() {
+    var el = $('username-status');
+    el.textContent = '';
+    el.className = 'ig-status hidden';
+  }
+
+  /** Показывает под полем ника предупреждение, если такой клиент уже в базе. */
+  function checkUsernameDuplicate() {
+    var dup = findDuplicateClient($('f-ig-username').value, $('f-id').value);
+    var el = $('username-status');
+    if (!dup) {
+      hideUsernameStatus();
+      return;
+    }
+    el.textContent = 'Клиент с таким Instagram-ником уже добавлен в базу' +
+      (dup.name ? ': «' + dup.name + '»' : '');
+    el.className = 'ig-status warn';
+  }
+
   function fetchIg() {
     var input = $('ig-input').value.trim();
     hideIgStatus();
@@ -359,6 +395,7 @@
       // имя не перезаписываем, если уже введено вручную
       if (d.fullName && !$('f-name').value.trim()) $('f-name').value = d.fullName;
       updateAvatarPreview();
+      checkUsernameDuplicate();
 
       if (res.partial) {
         showIgStatus(res.warning || 'Instagram не отдал данные профиля — заполните поля вручную.', 'warn');
@@ -395,6 +432,13 @@
     };
     if (!client.name && !client.igUsername) {
       toast('Укажите хотя бы имя или Instagram-ник клиента', 'error');
+      return;
+    }
+    // быстрая проверка по загруженному списку; финальную — делает сервер
+    var dup = findDuplicateClient(client.igUsername, client.id);
+    if (dup) {
+      toast('Не удалось сохранить: клиент с таким Instagram-ником уже добавлен в базу' +
+        (dup.name ? ': «' + dup.name + '»' : ''), 'error');
       return;
     }
     var btn = $('btn-save');
@@ -532,6 +576,7 @@
     ['f-name', 'f-ig-username', 'f-avatar'].forEach(function (id) {
       $(id).addEventListener('input', updateAvatarPreview);
     });
+    $('f-ig-username').addEventListener('input', checkUsernameDuplicate);
 
     $('like-stars').addEventListener('click', onStarsClick);
     $('like-clear').addEventListener('click', function () {
