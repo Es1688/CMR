@@ -1,0 +1,28 @@
+version: 1
+name: kutuncev-crm
+type: google-apps-script
+description: CRM на Google Apps Script (Kwork-клиент) — учёт клиентов, дедупликация по Instagram-нику
+
+language: { name: javascript, dialect: google-apps-script }
+files:
+  code: Code.gs
+  ui: [Index.html, JavaScript.html, Styles.html]
+  tests: tests/
+
+deploy:
+  how: вручную через редактор Google Apps Script (clasp — опционально)
+  policy: только пользователь (Level C)
+
+repository:
+  platform: github            # private, создаётся при первом push
+  default_branch: main
+  strategy: github-flow
+
+quality:
+  test: tests/ (Node)
+  lint: null
+
+ai:
+  allow_shell: controlled
+  allow_git_push: confirm
+  execution_mode: build
