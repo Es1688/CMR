@@ -1,0 +1,27 @@
+# Внутренние файлы ZCode (планы сессий, локальный контекст); манифест проекта — в git
+.zcode/*
+!.zcode/project.yaml
+
+# Конфиги clasp (содержат ID скрипта и учётные данные) — если будете пользоваться clasp
+.clasp.json
+.clasprc.json
+
+# Секреты и переменные окружения
+.env
+.env.*
+
+# Node (тесты запускаются локально через Node)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+*.log
+
+# Служебные файлы ОС
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Файлы редакторов
+.idea/
+.vscode/
+*.swp
