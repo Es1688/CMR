@@ -19,8 +19,12 @@ repository:
   strategy: github-flow
 
 quality:
-  test: tests/ (Node)
+  test: tests/ (Node; CI: GitHub Actions — push/PR, Node 20)
   lint: null
+
+ci:
+  workflow: .github/workflows/ci.yml
+  runs: tests/*.test.js
 
 ai:
   allow_shell: controlled
